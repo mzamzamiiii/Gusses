@@ -4,18 +4,18 @@ import wolfjs from 'wolf.js';
 const { WOLF } = wolfjs;
 
 const accounts = [
-  { identity: process.env.U1_MAIL, secret: process.env.U1_PASS },
-  { identity: process.env.U2_MAIL, secret: process.env.U2_PASS },
-  { identity: process.env.U3_MAIL, secret: process.env.U3_PASS },
-  { identity: process.env.U4_MAIL, secret: process.env.U4_PASS },
-  { identity: process.env.U5_MAIL, secret: process.env.U5_PASS },
-  { identity: process.env.U6_MAIL, secret: process.env.U6_PASS },
-  { identity: process.env.U7_MAIL, secret: process.env.U7_PASS },
-  { identity: process.env.U8_MAIL, secret: process.env.U8_PASS },
-  { identity: process.env.U9_MAIL, secret: process.env.U9_PASS },
-  { identity: process.env.U10_MAIL, secret: process.env.U10_PASS },
-  { identity: process.env.U11_MAIL, secret: process.env.U11_PASS },
-  { identity: process.env.U12_MAIL, secret: process.env.U12_PASS }
+  { identity: process.env.U_MAIL_1, secret: process.env.U_PASS_1 },
+  { identity: process.env.U_MAIL_2, secret: process.env.U_PASS_2 },
+  { identity: process.env.U_MAIL_3, secret: process.env.U_PASS_3 },
+  { identity: process.env.U_MAIL_4, secret: process.env.U_PASS_4 },
+  { identity: process.env.U_MAIL_5, secret: process.env.U_PASS_5 },
+  { identity: process.env.U_MAIL_6, secret: process.env.U_PASS_6 },
+  { identity: process.env.U_MAIL_7, secret: process.env.U_PASS_7 },
+  { identity: process.env.U_MAIL_8, secret: process.env.U_PASS_8 },
+  { identity: process.env.U_MAIL_9, secret: process.env.U_PASS_9 },
+  { identity: process.env.U_MAIL_10, secret: process.env.U_PASS_10 },
+  { identity: process.env.U_MAIL_11, secret: process.env.U_PASS_11 },
+  { identity: process.env.U_MAIL_12, secret: process.env.U_PASS_12 }
 ];
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
