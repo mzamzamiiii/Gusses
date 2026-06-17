@@ -4,7 +4,7 @@ import wolfjs from 'wolf.js';
 const { WOLF } = wolfjs;
 const client = new WOLF();
 
-const ROOM_ID = 11194358;
+const ROOM_ID = 215022;
 const ALLOWED_USER_ID = 26491704;
 
 async function start() {
