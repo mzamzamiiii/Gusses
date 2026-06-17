@@ -30,31 +30,46 @@ client.on('ready', async () => {
   }
 });
 
-// ================== IMAGE AI ==================
+// ================== IMAGE ANALYSIS (HIGH ACCURACY + SHORT OUTPUT) ==================
 async function analyzeImage(imageUrl) {
   try {
+    const buffer = await fetch(imageUrl).then(r => r.arrayBuffer());
+
     const res = await fetch(
-      "https://api-inference.huggingface.co/models/google/vit-base-patch16-224",
+      "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-base",
       {
         method: "POST",
         headers: {
           Authorization: `Bearer ${process.env.HF_TOKEN}`,
-          "Content-Type": "application/json"
+          "Content-Type": "application/octet-stream"
         },
-        body: JSON.stringify({ inputs: imageUrl })
+        body: Buffer.from(buffer)
       }
     );
 
     const data = await res.json();
 
-    return data?.[0]?.label || "Unknown";
+    let text = data?.[0]?.generated_text || "Unknown";
+
+    // ✂️ نخليها كلمة أو كلمتين فقط
+    text = text
+      .replace("a photo of", "")
+      .replace("an image of", "")
+      .replace("a picture of", "")
+      .trim()
+      .split(" ")
+      .slice(0, 2)
+      .join(" ");
+
+    return text || "Unknown";
 
   } catch (err) {
-    return "Error";
+    console.log("AI ERROR:", err);
+    return "Unknown";
   }
 }
 
-// ================== HELPERS ==================
+// ================== GET IMAGE ==================
 function getImageUrl(message) {
   return (
     message.imageUrl ||
@@ -66,11 +81,11 @@ function getImageUrl(message) {
   );
 }
 
-// ================== MAIN LISTENER ==================
+// ================== LISTENER (STRICT FILTER) ==================
 client.on('groupMessage', async (message) => {
   try {
 
-    // 🔥 فلتر نفس الكود الشغال
+    // 🔥 نفس العضو + نفس القناة
     if (
       message.sourceSubscriberId !== TARGET_USER_ID ||
       message.targetGroupId !== ROOM_ID
@@ -78,24 +93,20 @@ client.on('groupMessage', async (message) => {
 
     if (!waitingForImage) return;
 
-    console.log("========== NEW MESSAGE ==========");
-
     const imageUrl = getImageUrl(message);
 
-    if (!imageUrl) {
-      console.log("❌ No image found");
-      return;
-    }
+    if (!imageUrl) return;
 
-    console.log("🖼️ Image URL:", imageUrl);
+    console.log("🖼️ Image received");
 
     const result = await analyzeImage(imageUrl);
 
-    console.log("🤖 AI RESULT:", result);
+    console.log("RESULT =", result);
 
+    // ❌ بدون 🧠 نهائيًا
     await client.messaging.sendGroupMessage(
       ROOM_ID,
-      `🧠 ${result}`
+      result
     );
 
     waitingForImage = false;
