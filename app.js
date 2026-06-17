@@ -11,10 +11,10 @@ const TARGET_USER_ID = 26491704;
 
 let waitingForImage = false;
 
-// ================== LOGIN ==================
+// ================== START ==================
 client.on('ready', async () => {
   try {
-    console.log('✅ Logged in');
+    console.log('🚀 Bot started');
 
     await client.messaging.sendGroupMessage(
       ROOM_ID,
@@ -30,13 +30,13 @@ client.on('ready', async () => {
   }
 });
 
-// ================== FREE AI (HuggingFace) ==================
+// ================== IMAGE AI (CLIP - BEST FREE OPTION) ==================
 async function analyzeImage(imageUrl) {
   try {
     const buffer = await fetch(imageUrl).then(r => r.arrayBuffer());
 
     const res = await fetch(
-      "https://api-inference.huggingface.co/models/nlpconnect/vit-gpt2-image-captioning",
+      "https://api-inference.huggingface.co/models/openai/clip-vit-large-patch14",
       {
         method: "POST",
         headers: {
@@ -49,20 +49,23 @@ async function analyzeImage(imageUrl) {
 
     const data = await res.json();
 
-    let text = data?.[0]?.generated_text || "Unknown";
+    const best = data?.[0];
 
-    // ✂️ تحويلها لكلمة أو كلمتين فقط
-    text = text
+    let label = best?.label || "Unknown";
+
+    // تنظيف النتيجة لتناسب لعبة التخمين
+    label = label
       .toLowerCase()
       .replace("a photo of", "")
+      .replace("photo of", "")
       .replace("an image of", "")
-      .replace("a picture of", "")
+      .replace("image of", "")
       .trim()
       .split(" ")
-      .slice(0, 2)
+      .slice(0, 3)
       .join(" ");
 
-    return text || "Unknown";
+    return label || "Unknown";
 
   } catch (err) {
     console.log("AI ERROR:", err);
@@ -86,7 +89,7 @@ function getImageUrl(message) {
 client.on('groupMessage', async (message) => {
   try {
 
-    // 🔥 شرط العضو + القناة
+    // 🔥 شرط: نفس العضو + نفس القناة
     if (
       message.sourceSubscriberId !== TARGET_USER_ID ||
       message.targetGroupId !== ROOM_ID
@@ -116,7 +119,7 @@ client.on('groupMessage', async (message) => {
   }
 });
 
-// ================== START ==================
+// ================== LOGIN ==================
 (async () => {
   try {
     await client.login(
@@ -124,7 +127,7 @@ client.on('groupMessage', async (message) => {
       process.env.U_PASS_1
     );
 
-    console.log('🚀 Bot started');
+    console.log('🔐 Logged in');
   } catch (err) {
     console.error('❌ login error:', err);
   }
