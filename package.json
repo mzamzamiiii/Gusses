@@ -1,8 +1,8 @@
 {
-  "name": "wolf-multi-bot",
+  "name": "wolf-bot-clean",
   "version": "1.0.0",
   "type": "module",
-  "description": "12-account automation bot with queue system",
+  "description": "Clean wolf.js bot",
   "main": "app.js",
   "scripts": {
     "start": "node app.js"
@@ -12,6 +12,6 @@
   },
   "dependencies": {
     "dotenv": "^16.4.7",
-    "wolf.js": "^2.7.9"
+    "wolf.js": "^2.7.10"
   }
 }
