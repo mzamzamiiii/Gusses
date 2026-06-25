@@ -62,46 +62,41 @@ function stopWatchdog() {
   }
 }
 
-// ================== 🔍 منظومة قنص المحركات والبحث العكسي البشري ==================
+// ================== 🔍 منظومة القنص العكسي المطور ==================
 
 async function searchYandex(imageUrl) {
   try {
     const searchUrl = `https://yandex.com/images/search?rpt=imageview&url=${encodeURIComponent(imageUrl)}`;
-    const response = await axios.get(searchUrl, { headers: getHumanHeaders(), timeout: 6000 });
-    const $ = cheerio.load(response.data);
-    
-    // استخراج الكلمات الدلالية أو العناوين المقترحة للصور الشبيهة
-    let tags = [];
-    $('.CbirTags-Item').each((i, el) => { tags.push($(el).text().trim()); });
-    const fallbackTitle = $('.CbirObjectResponse-Title').text().trim();
-    
-    if (tags.length > 0) return tags.join(' ');
-    return fallbackTitle || '';
-  } catch (err) {
-    console.log('⚠️ [Yandex]: فشل الفحص السريع أو حظر مؤقت.');
-    return '';
-  }
-}
+    const headers = getHumanHeaders();
+    headers['Referer'] = 'https://www.google.com/'; 
 
-async function searchGoogleLens(imageUrl) {
-  try {
-    const searchUrl = `https://lens.google.com/uploadbyurl?url=${encodeURIComponent(imageUrl)}&hl=ar`;
-    const response = await axios.get(searchUrl, { headers: getHumanHeaders(), timeout: 6000 });
+    const response = await axios.get(searchUrl, { headers, timeout: 7000 });
     const $ = cheerio.load(response.data);
     
-    // قشط التخمين الأفضل للنص المكتوب بداخل صفحة لينز العامة
-    const title = $('title').text().trim();
-    let bestGuess = '';
-    
-    // استخراج النصوص العادية القريبة من المعالم أو الكائنات داخل اللوحة
-    $('a, h1, h2').each((i, el) => {
-      const txt = $(el).text().trim();
-      if (txt.length > 2 && txt.length < 30) bestGuess += ' ' + txt;
+    const pageTitle = $('title').text().trim();
+    console.log(`🤖 [تشخيص Yandex]: عنوان الصفحة المستلمة هو [ ${pageTitle} ]`);
+
+    if (pageTitle.includes('Captcha') || pageTitle.includes('Robot') || pageTitle.includes('Access Denied')) {
+      console.log('⚠️ [Yandex]: انصدمنا بكابتشا ياندكس الحذر.');
+      return '';
+    }
+
+    let foundTexts = [];
+
+    // جلب النصوص من الكلاسات المحدثة للتعرف البصري في ياندكس
+    $('.CbirTags-Item, .CbirObjectResponse-Title, .CbirItem-Title, .CbirPage-Title').each((i, el) => {
+      foundTexts.push($(el).text().trim());
     });
-    
-    return bestGuess || title;
+
+    // حيلة إضافية: سحب العناوين من الصور المشابهة تماماً (Similar Images)
+    $('.Thumb-Image').each((i, el) => {
+      const altText = $(el).attr('alt');
+      if (altText) foundTexts.push(altText.trim());
+    });
+
+    return foundTexts.join(' ');
   } catch (err) {
-    console.log('⚠️ [Google Lens]: فشل المحاكاة أو طلب كابتشا.');
+    console.log(`⚠️ [Yandex]: خطأ في الاتصال أو انتهت مهلة طلب ياندكس.`);
     return '';
   }
 }
@@ -109,15 +104,24 @@ async function searchGoogleLens(imageUrl) {
 async function searchBing(imageUrl) {
   try {
     const searchUrl = `https://www.bing.com/images/searchbyimage?cbir=sbi&imgurl=${encodeURIComponent(imageUrl)}`;
-    const response = await axios.get(searchUrl, { headers: getHumanHeaders(), timeout: 6000 });
+    const headers = getHumanHeaders();
+    headers['Referer'] = 'https://www.bing.com/';
+
+    const response = await axios.get(searchUrl, { headers, timeout: 7000 });
     const $ = cheerio.load(response.data);
     
+    const pageTitle = $('title').text().trim();
+    console.log(`🤖 [تشخيص Bing]: عنوان الصفحة المستلمة هو [ ${pageTitle} ]`);
+
     let bingResults = [];
-    $('.cb_title').each((i, el) => { bingResults.push($(el).text().trim()); });
-    
+    // قشط كلاسات بينج للتعرف البصري
+    $('.cb_title, .b_focusText, .vsc_title').each((i, el) => {
+      bingResults.push($(el).text().trim());
+    });
+
     return bingResults.join(' ');
   } catch (err) {
-    console.log('⚠️ [Bing]: المحرك لم يستجب بالشكل المطلوب.');
+    console.log('⚠️ [Bing]: فشل قشط محرك بينج أو انتهت المهلة.');
     return '';
   }
 }
@@ -127,21 +131,27 @@ async function searchBing(imageUrl) {
 function cleanAndFilterResult(rawText, category) {
   if (!rawText) return '';
 
-  // تنظيف الرموز الشائعة والكلمات الحشوية التي يرميها المتصفح
+  console.log(`📋 [نص المحركات الخام]: ${rawText.substring(0, 150)}...`);
+
+  // تنظيف النص بالكامل وحذف الرموز الحشوية المعيقة
   let text = rawText
-    .replace(/[❌⭕⭐✨🔍🔴🔵🆚|,\-_()]/g, ' ')
+    .replace(/[❌⭕⭐✨🔍🔴🔵🆚|,\-_()/\\:.]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 
-  // الكلمات الممنوعة من الإرسال كحلول
-  const blacklistedWords = ['صورة', 'البحث', 'خمن', 'لعبة', 'انمي', 'الفئة', 'تحميل', 'جوجل', 'ياندكس', 'images', 'yandex', 'google'];
+  // الكلمات الممنوعة والمصفاة لتجنب الأجوبة الغريبة
+  const blacklistedWords = ['صورة', 'البحث', 'خمن', 'لعبة', 'انمي', 'الفئة', 'تحميل', 'جوجل', 'ياندكس', 'شخصية', 'الفنان', 'الممثل', 'تصوير', 'images', 'yandex', 'google', 'captcha'];
   
-  let words = text.split(' ').filter(word => word.length > 1 && !blacklistedWords.includes(word.toLowerCase()));
+  let words = text.split(' ').filter(word => {
+    return word.length > 1 && !blacklistedWords.includes(word.toLowerCase());
+  });
 
-  // سحب أول كلمتين فقط لضمان دقة "خمن" القائمة على السرعة والإيجاز
+  if (words.length === 0) return '';
+
+  // سحب أول كلمتين لضمان تقديم إجابة سريعة وموجزة تناسب نظام بوت خمن
   let finalAnswer = words.slice(0, 2).join(' ');
 
-  console.log(`🧠 [تصفية الذكاء البصري]: الفئة المتوقعة [ ${category} ] | النص المستخرج المصفى [ ${finalAnswer} ]`);
+  console.log(`🧠 [تصفية الذكاء البصري]: الفئة [ ${category} ] ⬅️ الحل المستخرج [ ${finalAnswer} ]`);
   return finalAnswer;
 }
 
@@ -162,7 +172,7 @@ async function handleIncomingData(message) {
       }
     }
     
-    // 2️⃣ رصد نهاية اللعبة (سواء بالفوز أو انتهاء الوقت) لبدء مؤقت الـ 25 ثانية لإنعاش الروم
+    // 2️⃣ رصد نهاية اللعبة لبدء مؤقت الـ 25 ثانية لإنعاش الروم تلقائياً
     if (bodyText.includes('خمنت ذلك في') || bodyText.includes('انتهى الوقت')) {
       console.log('🏁 [نهاية الجولة]: رصد إعلان انتهاء اللعبة، بدء عداد الأمان الـ 25 ثانية...');
       currentCategory = ''; // تصفير الفئة للجولة القادمة
@@ -171,38 +181,36 @@ async function handleIncomingData(message) {
     return;
   }
 
-  // 3️⃣ التقاط رابط الصورة وبدء عملية القنص الفوري
+  // 3️⃣ التقاط رابط الصورة وبدء عملية القنص الفوري عبر المحركات
   if (message.type === 'text/image_link') {
     stopWatchdog(); // أمان إضافي أثناء معالجة الصور
     const imageUrl = bodyText.trim();
     console.log(`📸 [صيد الهدف]: تم استلام رابط الصورة بنجاح: ${imageUrl}`);
 
-    console.log('🚀 [السباق الذكي]: تفعيل المحركات الثلاثة بالتوازي لمحاكاة تصفح بشري...');
+    console.log('🚀 [السباق الذكي]: تفعيل المحركات بالتوازي لمحاكاة تصفح بشري...');
     
-    // إطلاق محركات البحث العكسي في نفس اللحظة
-    const [yandexResult, googleResult, bingResult] = await Promise.all([
+    // إطلاق محركات البحث العكسي بالتوازي لسرعة خارقة
+    const [yandexResult, bingResult] = await Promise.all([
       searchYandex(imageUrl),
-      searchGoogleLens(imageUrl),
       searchBing(imageUrl)
     ]);
 
-    // تجميع نتائج السباق العكسي (الأولوية لـ Yandex ثم Google ثم Bing)
-    const combinedRawResult = `${yandexResult} ${googleResult} ${bingResult}`.trim();
+    // تجميع نتائج السباق العكسي
+    const combinedRawResult = `${yandexResult} ${bingResult}`.trim();
     const finalDecision = cleanAndFilterResult(combinedRawResult, currentCategory);
 
     if (finalDecision) {
-      // ⏳ تأخير بشري عشوائي (تفكير مابين 2.5 إلى 4.5 ثوانٍ) حتى لا ينكشف الحساب
+      // ⏳ تأخير بشري عشوائي (تفكير مابين 2.5 إلى 4.5 ثوانٍ) حماية للحساب من باند السرعة التلقائية
       const humanDelay = Math.floor(Math.random() * (4500 - 2500 + 1)) + 2500;
       console.log(`⏳ محاكاة تفكير بشري، إرسال الحل [ ${finalDecision} ] بعد [ ${humanDelay}ms ]...`);
       
       setTimeout(async () => {
         await sendGroupMessageWithRetry(ROOM_ID, finalDecision);
-        // تشغيل حارس الأمان بعد رمي الإجابة لانتظار رد فعل بوت خمن
-        startWatchdog();
+        startWatchdog(); // تشغيل حارس الأمان بعد رمي الإجابة لانتظار الجولة القادمة
       }, humanDelay);
     } else {
       console.log('❌ [فشل القنص]: لم تخرج المحركات بنتيجة واضحة، الصمت البشري هو الحل لتفادي الخطأ.');
-      startWatchdog(); // إعادة الحارس لحماية اللعبة من الموت
+      startWatchdog(); // إعادة الحارس لحماية اللعبة من التوقف
     }
   }
 }
@@ -230,7 +238,7 @@ async function sendGroupMessageWithRetry(roomId, text, attempt = 1) {
 function startBot() {
   service = new WOLF();
 
-  // الاستماع للرسائل داخل الغرف والتحقق من الهويات
+  // الاستماع للرسائل داخل الغرف والتحقق من الهويات المستهدفة
   service.on('message', async (message) => {
     const senderId = Number(message.sourceSubscriberId);
     const groupId = Number(message.targetGroupId);
@@ -244,14 +252,14 @@ function startBot() {
     isBotReady = true;
     reconnecting = false;
     
-    // بدء الشرارة الأولى فور الدخول للروم
+    // بدء الشرارة الأولى فور الدخول للروم بنجاح
     await sleep(2000);
     console.log(`🔥 إشعال اللعبة لأول مرة عبر إرسال: [ ${START_COMMAND} ]`);
     await sendGroupMessageWithRetry(ROOM_ID, START_COMMAND);
     startWatchdog();
   });
 
-  // إعادة الاتصال التلقائي الصارم في حال حدوث أي دروب بالشبكة
+  // إعادة الاتصال التلقائي الصارم في حال حدوث أي دروب بالشبكة لضمان عمله 24/7
   const restart = () => {
     if (reconnecting) return;
     reconnecting = true;
