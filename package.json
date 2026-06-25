@@ -10,7 +10,6 @@
     "dotenv": "latest",
     "wolf.js": "latest",
     "axios": "latest",
-    "cheerio": "latest",
-    "@vitalets/google-translate-api": "latest"
+    "cheerio": "latest"
   }
 }
