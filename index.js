@@ -65,7 +65,8 @@ function stopWatchdog() {
 
 async function searchYandex(imageUrl) {
   try {
-    const searchUrl = `https://yandex.com/images/search?rpt=imageview&url=${encodeURIComponent(imageUrl)}`;
+    // محاولة إجبار ياندكس على التحدث بالعربية أيضاً عبر الهيدرز والروابط
+    const searchUrl = `https://yandex.com/images/search?rpt=imageview&url=${encodeURIComponent(imageUrl)}&lang=ar`;
     const headers = getHumanHeaders();
     headers['Referer'] = 'https://www.google.com/'; 
 
@@ -80,7 +81,7 @@ async function searchYandex(imageUrl) {
     }
 
     let foundTexts = [];
-    $('.CbirTags-Item, .CbirObjectResponse-Title, .CbirItem-Title, .CbirPage-Title').each((i, el) => {
+    $('.CbirTags-Item, .CbirObjectResponse-Title, .CbirItem-Title, .CbirPage-Title'). Bellach((i, el) => {
       foundTexts.push($(el).text().trim());
     });
 
@@ -97,7 +98,8 @@ async function searchYandex(imageUrl) {
 
 async function searchBing(imageUrl) {
   try {
-    const searchUrl = `https://www.bing.com/images/searchbyimage?cbir=sbi&imgurl=${encodeURIComponent(imageUrl)}`;
+    // 🔥 الحيلة التكتيكية: إجبار بينج على جلب النتائج بالعربية وبلاد السيرفر العربي المستهدف
+    const searchUrl = `https://www.bing.com/images/searchbyimage?cbir=sbi&imgurl=${encodeURIComponent(imageUrl)}&setlang=ar&cc=SA`;
     const headers = getHumanHeaders();
     headers['Referer'] = 'https://www.bing.com/';
 
@@ -109,7 +111,7 @@ async function searchBing(imageUrl) {
 
     let bingResults = [];
     
-    // 🔥 الحيلة الذهبية الحالية: إذا كان التخمين في العنوان، نسحبه فوراً قبل كل شيء!
+    // سحب التخمين الأساسي من العنوان
     if (pageTitle && pageTitle.includes('-')) {
       const cleanGuess = pageTitle.split('-')[0].trim();
       if (!['Bing', 'Search', 'بحث', 'Images', 'صورة', 'Visual'].includes(cleanGuess)) {
@@ -117,7 +119,7 @@ async function searchBing(imageUrl) {
       }
     }
 
-    // كخيار احتياطي، نسحب باقي الكلاسات داخل الصفحة
+    // خيار احتياطي من الكلاسات الداخلية
     $('.cb_title, .b_focusText, .vsc_title, .VisualSearchCaptionTitle').each((i, el) => {
       bingResults.push($(el).text().trim());
     });
@@ -149,8 +151,15 @@ function cleanAndFilterResult(rawText, category) {
 
   if (words.length === 0) return '';
 
-  // سحب أول كلمتين (مثال: Megan Fox) لرميها مباشرة
-  let finalAnswer = words.slice(0, 2).join(' ');
+  // 🧠 ذكاء الفلترة المطور ومنع البتر:
+  let maxWords = 2;
+  
+  // إذا كانت الكلمة الثانية أداة ربط أجنبية، نرفع حد الجلب لـ 3 كلمات لضمان اكتمال الاسم الجغرافي أو الفني
+  if (words[1] && ['di', 'of', 'de', 'the', 'da', 'del', 'la'].includes(words[1].toLowerCase())) {
+    maxWords = 3;
+  }
+  
+  let finalAnswer = words.slice(0, maxWords).join(' ');
 
   console.log(`🧠 [تصفية الذكاء البصري]: الفئة [ ${category} ] ⬅️ الحل المستخرج [ ${finalAnswer} ]`);
   return finalAnswer;
