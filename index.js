@@ -1,62 +1,275 @@
 import 'dotenv/config';
 import wolfjs from 'wolf.js';
+import axios from 'axios';
+import * as cheerio from 'cheerio';
 
 const { WOLF } = wolfjs;
 
-// ================== إعدادات الفحص ==================
-const ROOM_ID = 70505;        // آيدي الروم اللي فيها اللعبة
-const GAME_BOT_ID = 26491704;    // ضع هنا آيدي بوت "خمن" بدلاً من آيدي الأكس أو
+// ================== ⚙️ الثوابت والإعدادات الأساسية ==================
+const ROOM_ID = 70505;        // آيدي الروم المستهدف
+const GAME_BOT_ID = 26491704;  // آيدي بوت خمن
+const START_COMMAND = '!ج';    // أمر تشغيل اللعبة
 
-const service = new WOLF();
+let service = null;
+let isBotReady = false;
+let reconnecting = false;
 
-// دالة تحليل وتفكيك هيكل الرسالة
-function analyzeMessage(message) {
-  // تصفية الرسائل لتظهر فقط القادمة من بوت اللعبة داخل الروم المستهدف
-  const senderId = Number(message.sourceSubscriberId);
-  const groupId = Number(message.targetGroupId);
+// 🧠 الذاكرة المؤقتة للبوت
+let currentCategory = '';      // لحفظ الفئة الحالية (انمي، معالم، إلخ)
+let watchdogTimer = null;      // 🐕 حارس الأمان ذو الـ 25 ثانية
 
-  if (groupId !== ROOM_ID || senderId !== GAME_BOT_ID) return;
+// 👤 قائمة هويات متصفح حقيقية للمحاكاة البشرية (User-Agents)
+const USER_AGENTS = [
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/119.0',
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+];
 
-  console.log('\n🎯 ======= [ تم التقاط رسالة من بوت خمن ] =======');
-  console.log(`🆔 نوع الرسالة الأساسي (Type): ${message.type}`);
-  console.log(`👤 آيدي المرسل: ${senderId}`);
-  
-  console.log('\n📝 محتوى نص الرسالة (Body):');
-  console.log(message.body);
-
-  // إذا كانت منصة ولف ترسل الصورة كمرفق مدمج (Embeds)
-  if (message.embeds && message.embeds.length > 0) {
-    console.log('\n🔗 تم العثور على ملاحق مدمجة (Embeds):');
-    console.log(JSON.stringify(message.embeds, null, 2));
-  }
-
-  // طباعة الكائن (Object) كاملاً بصيغة JSON لمعرفة كل خباياه
-  console.log('\n🔍 تفكيك الكائن كاملاً (Full Message Object):');
-  console.log(JSON.stringify(message, null, 2));
-  console.log('==================================================\n');
+// دالة لجلب هيدرز تحاكي تصفح إنسان حقيقي بالكامل
+function getHumanHeaders() {
+  const randomUA = USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+  return {
+    'User-Agent': randomUA,
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+    'Accept-Language': 'ar,en-US;q=0.9,en;q=0.8',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Cache-Control': 'max-age=0',
+    'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+    'Sec-Ch-Ua-Mobile': '?0',
+    'Sec-Ch-Ua-Platform': '"Windows"',
+    'Upgrade-Insecure-Requests': '1'
+  };
 }
 
-// التنصت على الرسائل الجديدة
-service.on('message', async (message) => {
-  analyzeMessage(message);
-});
+// ================== 🐕 منظومة حارس الأمان والإنعاش التلقائي ==================
 
-// التنصت على تحديثات الرسائل (لو البوت يعدل رسالته ليضع الصورة)
-service.on('messageUpdate', async (message) => {
-  console.log('🔄 [تنبيه]: حدث تعديل على رسالة قائمة!');
-  analyzeMessage(message);
-});
+function startWatchdog() {
+  clearTimeout(watchdogTimer);
+  watchdogTimer = setTimeout(async () => {
+    if (isBotReady) {
+      console.log(`🐕 [حارس الأمان]: مرت 25 ثانية من الركود! إنعاش الروم بإرسال [ ${START_COMMAND} ]...`);
+      await sendGroupMessageWithRetry(ROOM_ID, START_COMMAND);
+      startWatchdog(); // إعادة تشغيل المؤقت للحماية المستمرة
+    }
+  }, 25000);
+}
 
-service.on('ready', () => {
-  console.log('🚀 كاشف ومحلل الرسائل يعمل الآن بنجاح...');
-  console.log(`📡 يتم الآن مراقبة الروم [ ${ROOM_ID} ] وبوت اللعبة [ ${GAME_BOT_ID} ]`);
-});
+function stopWatchdog() {
+  if (watchdogTimer) {
+    clearTimeout(watchdogTimer);
+    watchdogTimer = null;
+  }
+}
 
-service.on('error', (err) => {
-  console.error('❌ حدث خطأ في الاتصال:', err);
-});
+// ================== 🔍 منظومة قنص المحركات والبحث العكسي البشري ==================
 
-// تسجيل الدخول بالحساب التجريبي
-service.login(process.env.U_MAIL_1, process.env.U_PASS_1).catch((err) => {
-  console.error('❌ فشل تسجيل الدخول:', err);
-});
+async function searchYandex(imageUrl) {
+  try {
+    const searchUrl = `https://yandex.com/images/search?rpt=imageview&url=${encodeURIComponent(imageUrl)}`;
+    const response = await axios.get(searchUrl, { headers: getHumanHeaders(), timeout: 6000 });
+    const $ = cheerio.load(response.data);
+    
+    // استخراج الكلمات الدلالية أو العناوين المقترحة للصور الشبيهة
+    let tags = [];
+    $('.CbirTags-Item').each((i, el) => { tags.push($(el).text().trim()); });
+    const fallbackTitle = $('.CbirObjectResponse-Title').text().trim();
+    
+    if (tags.length > 0) return tags.join(' ');
+    return fallbackTitle || '';
+  } catch (err) {
+    console.log('⚠️ [Yandex]: فشل الفحص السريع أو حظر مؤقت.');
+    return '';
+  }
+}
+
+async function searchGoogleLens(imageUrl) {
+  try {
+    const searchUrl = `https://lens.google.com/uploadbyurl?url=${encodeURIComponent(imageUrl)}&hl=ar`;
+    const response = await axios.get(searchUrl, { headers: getHumanHeaders(), timeout: 6000 });
+    const $ = cheerio.load(response.data);
+    
+    // قشط التخمين الأفضل للنص المكتوب بداخل صفحة لينز العامة
+    const title = $('title').text().trim();
+    let bestGuess = '';
+    
+    // استخراج النصوص العادية القريبة من المعالم أو الكائنات داخل اللوحة
+    $('a, h1, h2').each((i, el) => {
+      const txt = $(el).text().trim();
+      if (txt.length > 2 && txt.length < 30) bestGuess += ' ' + txt;
+    });
+    
+    return bestGuess || title;
+  } catch (err) {
+    console.log('⚠️ [Google Lens]: فشل المحاكاة أو طلب كابتشا.');
+    return '';
+  }
+}
+
+async function searchBing(imageUrl) {
+  try {
+    const searchUrl = `https://www.bing.com/images/searchbyimage?cbir=sbi&imgurl=${encodeURIComponent(imageUrl)}`;
+    const response = await axios.get(searchUrl, { headers: getHumanHeaders(), timeout: 6000 });
+    const $ = cheerio.load(response.data);
+    
+    let bingResults = [];
+    $('.cb_title').each((i, el) => { bingResults.push($(el).text().trim()); });
+    
+    return bingResults.join(' ');
+  } catch (err) {
+    console.log('⚠️ [Bing]: المحرك لم يستجب بالشكل المطلوب.');
+    return '';
+  }
+}
+
+// ================== 🧼 فلترة وتصفية الكلمات وتجهيز الحل البشري ==================
+
+function cleanAndFilterResult(rawText, category) {
+  if (!rawText) return '';
+
+  // تنظيف الرموز الشائعة والكلمات الحشوية التي يرميها المتصفح
+  let text = rawText
+    .replace(/[❌⭕⭐✨🔍🔴🔵🆚|,\-_()]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // الكلمات الممنوعة من الإرسال كحلول
+  const blacklistedWords = ['صورة', 'البحث', 'خمن', 'لعبة', 'انمي', 'الفئة', 'تحميل', 'جوجل', 'ياندكس', 'images', 'yandex', 'google'];
+  
+  let words = text.split(' ').filter(word => word.length > 1 && !blacklistedWords.includes(word.toLowerCase()));
+
+  // سحب أول كلمتين فقط لضمان دقة "خمن" القائمة على السرعة والإيجاز
+  let finalAnswer = words.slice(0, 2).join(' ');
+
+  console.log(`🧠 [تصفية الذكاء البصري]: الفئة المتوقعة [ ${category} ] | النص المستخرج المصفى [ ${finalAnswer} ]`);
+  return finalAnswer;
+}
+
+// ================== 🎮 معالجة البيانات وإدارة جولات اللعبة ==================
+
+async function handleIncomingData(message) {
+  const bodyText = message.body || '';
+
+  // 1️⃣ التقاط الفئة (الرسالة النصية الأولى)
+  if (message.type === 'text/plain') {
+    if (bodyText.includes('الفئة:')) {
+      stopWatchdog(); // إيقاف مؤقت الأمان لأن اللعبة بدأت بالفعل ولن يتجمد الآن
+      
+      const match = bodyText.match(/الفئة:\s*([^\r\n]+)/);
+      if (match) {
+        currentCategory = match[1].trim();
+        console.log(`📝 [ذاكرة الفئة]: تم رصد الفئة وتخزينها بنجاح ⬅️ [ ${currentCategory} ]`);
+      }
+    }
+    
+    // 2️⃣ رصد نهاية اللعبة (سواء بالفوز أو انتهاء الوقت) لبدء مؤقت الـ 25 ثانية لإنعاش الروم
+    if (bodyText.includes('خمنت ذلك في') || bodyText.includes('انتهى الوقت')) {
+      console.log('🏁 [نهاية الجولة]: رصد إعلان انتهاء اللعبة، بدء عداد الأمان الـ 25 ثانية...');
+      currentCategory = ''; // تصفير الفئة للجولة القادمة
+      startWatchdog();
+    }
+    return;
+  }
+
+  // 3️⃣ التقاط رابط الصورة وبدء عملية القنص الفوري
+  if (message.type === 'text/image_link') {
+    stopWatchdog(); // أمان إضافي أثناء معالجة الصور
+    const imageUrl = bodyText.trim();
+    console.log(`📸 [صيد الهدف]: تم استلام رابط الصورة بنجاح: ${imageUrl}`);
+
+    console.log('🚀 [السباق الذكي]: تفعيل المحركات الثلاثة بالتوازي لمحاكاة تصفح بشري...');
+    
+    // إطلاق محركات البحث العكسي في نفس اللحظة
+    const [yandexResult, googleResult, bingResult] = await Promise.all([
+      searchYandex(imageUrl),
+      searchGoogleLens(imageUrl),
+      searchBing(imageUrl)
+    ]);
+
+    // تجميع نتائج السباق العكسي (الأولوية لـ Yandex ثم Google ثم Bing)
+    const combinedRawResult = `${yandexResult} ${googleResult} ${bingResult}`.trim();
+    const finalDecision = cleanAndFilterResult(combinedRawResult, currentCategory);
+
+    if (finalDecision) {
+      // ⏳ تأخير بشري عشوائي (تفكير مابين 2.5 إلى 4.5 ثوانٍ) حتى لا ينكشف الحساب
+      const humanDelay = Math.floor(Math.random() * (4500 - 2500 + 1)) + 2500;
+      console.log(`⏳ محاكاة تفكير بشري، إرسال الحل [ ${finalDecision} ] بعد [ ${humanDelay}ms ]...`);
+      
+      setTimeout(async () => {
+        await sendGroupMessageWithRetry(ROOM_ID, finalDecision);
+        // تشغيل حارس الأمان بعد رمي الإجابة لانتظار رد فعل بوت خمن
+        startWatchdog();
+      }, humanDelay);
+    } else {
+      console.log('❌ [فشل القنص]: لم تخرج المحركات بنتيجة واضحة، الصمت البشري هو الحل لتفادي الخطأ.');
+      startWatchdog(); // إعادة الحارس لحماية اللعبة من الموت
+    }
+  }
+}
+
+// ================== ✉️ منظومة الإرسال الموثوق والمحصن ==================
+
+async function sendGroupMessageWithRetry(roomId, text, attempt = 1) {
+  if (!service || !isBotReady) return;
+  try {
+    const response = await service.messaging.sendGroupMessage(roomId, text);
+    if (!response || response.isSuccess === false) {
+      throw new Error(`كود الرفض أو فشل الإرسال المباشر`);
+    }
+    console.log(`✅ تم إرسال النص بنجاح في القناة: [ ${text} ]`);
+  } catch (err) {
+    console.log(`⚠️ فشل إرسال [ ${text} ]، محاولة جولة ثانية [ ${attempt}/3 ]: ${err.message}`);
+    if (attempt < 3) {
+      setTimeout(() => sendGroupMessageWithRetry(roomId, text, attempt + 1), 2000);
+    }
+  }
+}
+
+// ================== 📶 ربط الأحداث وتشغيل المنظومة الميكانيكية ==================
+
+function startBot() {
+  service = new WOLF();
+
+  // الاستماع للرسائل داخل الغرف والتحقق من الهويات
+  service.on('message', async (message) => {
+    const senderId = Number(message.sourceSubscriberId);
+    const groupId = Number(message.targetGroupId);
+    if (groupId === ROOM_ID && senderId === GAME_BOT_ID) {
+      handleIncomingData(message);
+    }
+  });
+
+  service.on('ready', async () => {
+    console.log('🚀 [الجاهزية]: بوت قناص خمن يعمل الآن بكفاءة بشرية قصوى ومجاني 100%.');
+    isBotReady = true;
+    reconnecting = false;
+    
+    // بدء الشرارة الأولى فور الدخول للروم
+    await sleep(2000);
+    console.log(`🔥 إشعال اللعبة لأول مرة عبر إرسال: [ ${START_COMMAND} ]`);
+    await sendGroupMessageWithRetry(ROOM_ID, START_COMMAND);
+    startWatchdog();
+  });
+
+  // إعادة الاتصال التلقائي الصارم في حال حدوث أي دروب بالشبكة
+  const restart = () => {
+    if (reconnecting) return;
+    reconnecting = true;
+    isBotReady = false;
+    stopWatchdog();
+    console.log('🚨 [اتصال]: تم قطع الاتصال! جاري محاولة إعادة الإنعاش والاتصال بعد 5 ثوانٍ...');
+    setTimeout(startBot, 5000);
+  };
+
+  service.on('error', restart);
+  service.on('disconnected', restart);
+  service.on('close', restart);
+
+  // الدخول بحساب البوت المخصص من ملف الـ .env
+  service.login(process.env.U_MAIL_1, process.env.U_PASS_1).catch(restart);
+}
+
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// انطلاق!
+startBot();
