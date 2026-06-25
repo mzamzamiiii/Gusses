@@ -2,7 +2,7 @@ import 'dotenv/config';
 import wolfjs from 'wolf.js';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { translate } from '@vitalets/google-translate-api'; // 🌍 استدعاء المترجم
+import { translate } from '@vitalets/google-translate-api';
 
 const { WOLF } = wolfjs;
 
@@ -35,23 +35,49 @@ function getHumanHeaders() {
   };
 }
 
-// ================== 🌍 منظومة الترجمة الفورية للعربية ==================
+// ================== 🌍 منظومة الترجمة الفورية الفكية ==================
 
 async function forceArabicTranslation(text) {
   if (!text) return '';
-  // التحقق البسيط إذا كان النص يحتوي أصلاً على حروف عربية لتخطي الترجمة
   const isArabic = /[\u0600-\u06FF]/.test(text);
   if (isArabic) return text;
 
   try {
-    console.log(`🌍 [المترجم]: اكتشاف لغة أجنبية [ ${text} ]... جاري التعريب!`);
+    console.log(`🌍 [المترجم]: اكتشاف نص أجنبي [ ${text} ]... جاري التعريب سياقياً...`);
     const { text: translatedText } = await translate(text, { to: 'ar' });
-    console.log(`✅ [المترجم]: تمت الترجمة بنجاح إلى ⬅️ [ ${translatedText} ]`);
     return translatedText;
   } catch (err) {
-    console.log(`⚠️ [المترجم]: فشل الاتصال بخادم الترجمة، سيتم إرسال النص الأصلي كخطة طوارئ.`);
-    return text; // في حال تعطل سيرفر جوجل، يرسل الكلمة الأصلية بدلاً من الصمت
+    console.log(`⚠️ [المترجم]: فشل خادم الترجمة، استخدام النص الخام.`);
+    return text;
   }
+}
+
+// ================== 🧼 فلترة وتطهير النص العربي المستخرج ==================
+
+function cleanArabicText(text, category) {
+  if (!text) return '';
+
+  // 🚫 قائمة الكلمات المترجمة صوتياً خطأ أو الكلمات الحشوية التي تفسد الحلول
+  const arabicJunk = [
+    'بانديرا', 'دي', 'أوف', 'ذا', 'سي', 'لا', 'لو', 'بحث', 'صورة', 'صور', 
+    'شعار', 'لوجو', 'ويكيبيديا', 'تحميل', 'تنزيل', 'موقع', 'جوجل', 'بينج', 'ياندكس'
+  ];
+
+  // تنظيف الرموز
+  let clean = text
+    .replace(/[❌⭕⭐✨🔍🔴🔵🆚|,\-_()/\\:.]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // فك الكلمات وفلترتها بناءً على القائمة السوداء
+  let words = clean.split(' ').filter(word => {
+    return word.length > 1 && !arabicJunk.includes(word.toLowerCase());
+  });
+
+  if (words.length === 0) return '';
+
+  // أخذ أول 3 كلمات كحد أقصى (وهي زبدة الإجابة دائماً مثل: "السويد"، "برج بيزا"، "كريستيانو رونالدو")
+  return words.slice(0, 3).join(' ');
 }
 
 // ================== 🐕 منظومة حارس الأمان ==================
@@ -134,38 +160,32 @@ async function searchBing(imageUrl) {
   }
 }
 
-// ================== 🧼 فلترة وتجهيز الحل البشري ==================
+// ================== 🧼 الفلترة والدمج الذكي للمحركات ==================
 
 async function cleanAndFilterResult(rawText, category) {
   if (!rawText) return '';
 
-  console.log(`📋 [نص المحركات الخام]: ${rawText.substring(0, 100)}...`);
+  console.log(`📋 [نص المحركات الخام]: ${rawText.substring(0, 120)}...`);
 
   let text = rawText
     .replace(/[❌⭕⭐✨🔍🔴🔵🆚|,\-_()/\\:.]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 
-  const blacklistedWords = ['صورة', 'البحث', 'خمن', 'لعبة', 'انمي', 'الفئة', 'تحميل', 'جوجل', 'ياندكس', 'شخصية', 'تصوير', 'images', 'yandex', 'google', 'captcha', 'بحث'];
-  
-  let words = text.split(' ').filter(word => {
-    return word.length > 1 && !blacklistedWords.includes(word.toLowerCase());
-  });
+  let words = text.split(' ');
+  if (words.length === 0 || words[0] === '') return '';
 
-  if (words.length === 0) return '';
+  // 🧠 نأخذ أول 5 كلمات أجنبية كاملة للحفاظ على تماسك الجملة أمام المترجم
+  let foreignPhrase = words.slice(0, 5).join(' ');
 
-  let maxWords = 2;
-  if (words[1] && ['di', 'of', 'de', 'the', 'da', 'del', 'la'].includes(words[1].toLowerCase())) {
-    maxWords = 3;
-  }
-  
-  let finalAnswer = words.slice(0, maxWords).join(' ');
+  // 🌍 ترجمة العبارة بشكل كامل وذكي
+  let arabicTranslation = await forceArabicTranslation(foreignPhrase);
 
-  // 🌍 تمرير الكلمة المستخرجة للمترجم قبل اعتمادها
-  let arabicAnswer = await forceArabicTranslation(finalAnswer);
+  // 🧼 غسيل وتطهير النص العربي من العبارات الصوتية المشوهة
+  let finalAnswer = cleanArabicText(arabicTranslation, category);
 
-  console.log(`🧠 [القرار النهائي]: الفئة [ ${category} ] ⬅️ الإجابة الجاهزة للرمي [ ${arabicAnswer} ]`);
-  return arabicAnswer;
+  console.log(`🧠 [تصفية الذكاء البصري]: الفئة [ ${category} ] ⬅️ الحل المستخرج النهائي [ ${finalAnswer} ]`);
+  return finalAnswer;
 }
 
 // ================== 🎮 معالجة جولات اللعبة ==================
@@ -203,19 +223,19 @@ async function handleIncomingData(message) {
 
     const combinedRawResult = `${yandexResult} ${bingResult}`.trim();
     
-    // ⚠️ استدعاء دالة الفلترة (أصبحت غير متزامنة await بسبب المترجم)
+    // استدعاء دالة الفلترة المتزامنة
     const finalDecision = await cleanAndFilterResult(combinedRawResult, currentCategory);
 
     if (finalDecision) {
       const humanDelay = Math.floor(Math.random() * (4500 - 2500 + 1)) + 2500;
-      console.log(`⏳ تأخير تفكير بشري [ ${humanDelay}ms ]...`);
+      console.log(`⏳ تأخير تفكير بشري [ ${humanDelay}ms ]... إرسال الحل [ ${finalDecision} ]`);
       
       setTimeout(async () => {
         await sendGroupMessageWithRetry(ROOM_ID, finalDecision);
         startWatchdog(); 
       }, humanDelay);
     } else {
-      console.log('❌ [فشل القنص]: لم يتم استخراج نتيجة واضحة.');
+      console.log('❌ [فشل القنص]: لم يتم استخراج نتيجة واضحة للصمت البشري.');
       startWatchdog(); 
     }
   }
@@ -228,7 +248,7 @@ async function sendGroupMessageWithRetry(roomId, text, attempt = 1) {
   try {
     const response = await service.messaging.sendGroupMessage(roomId, text);
     if (!response || response.isSuccess === false) throw new Error(`رفض السيرفر`);
-    console.log(`✅ تم الإرسال: [ ${text} ]`);
+    console.log(`✅ تم الإرسال بنجاح في القناة: [ ${text} ]`);
   } catch (err) {
     if (attempt < 3) {
       setTimeout(() => sendGroupMessageWithRetry(roomId, text, attempt + 1), 2000);
@@ -250,7 +270,7 @@ function startBot() {
   });
 
   service.on('ready', async () => {
-    console.log('🚀 [الجاهزية]: بوت قناص خمن يعمل بكفاءة قصوى (مدمج بالمترجم).');
+    console.log('🚀 [الجاهزية]: بوت قناص خمن المحصن ضد الترجمات العشوائية يعمل الآن.');
     isBotReady = true;
     reconnecting = false;
     
