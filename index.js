@@ -2,6 +2,7 @@ import 'dotenv/config';
 import wolfjs from 'wolf.js';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
+import { translate } from '@vitalets/google-translate-api'; // 🌍 استدعاء المترجم
 
 const { WOLF } = wolfjs;
 
@@ -14,16 +15,13 @@ let service = null;
 let isBotReady = false;
 let reconnecting = false;
 
-// 🧠 الذاكرة المؤقتة للبوت
-let currentCategory = '';      // لحفظ الفئة الحالية (انمي، معالم، إلخ)
-let watchdogTimer = null;      // 🐕 حارس الأمان ذو الـ 25 ثانية
+let currentCategory = '';      
+let watchdogTimer = null;      
 
-// 👤 قائمة هويات متصفح حقيقية للمحاكاة البشرية (User-Agents)
 const USER_AGENTS = [
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/119.0',
-  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/119.0'
 ];
 
 function getHumanHeaders() {
@@ -33,21 +31,36 @@ function getHumanHeaders() {
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
     'Accept-Language': 'ar,en-US;q=0.9,en;q=0.8',
     'Accept-Encoding': 'gzip, deflate, br',
-    'Cache-Control': 'max-age=0',
-    'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-    'Sec-Ch-Ua-Mobile': '?0',
-    'Sec-Ch-Ua-Platform': '"Windows"',
-    'Upgrade-Insecure-Requests': '1'
+    'Cache-Control': 'max-age=0'
   };
 }
 
-// ================== 🐕 منظومة حارس الأمان والإنعاش التلقائي ==================
+// ================== 🌍 منظومة الترجمة الفورية للعربية ==================
+
+async function forceArabicTranslation(text) {
+  if (!text) return '';
+  // التحقق البسيط إذا كان النص يحتوي أصلاً على حروف عربية لتخطي الترجمة
+  const isArabic = /[\u0600-\u06FF]/.test(text);
+  if (isArabic) return text;
+
+  try {
+    console.log(`🌍 [المترجم]: اكتشاف لغة أجنبية [ ${text} ]... جاري التعريب!`);
+    const { text: translatedText } = await translate(text, { to: 'ar' });
+    console.log(`✅ [المترجم]: تمت الترجمة بنجاح إلى ⬅️ [ ${translatedText} ]`);
+    return translatedText;
+  } catch (err) {
+    console.log(`⚠️ [المترجم]: فشل الاتصال بخادم الترجمة، سيتم إرسال النص الأصلي كخطة طوارئ.`);
+    return text; // في حال تعطل سيرفر جوجل، يرسل الكلمة الأصلية بدلاً من الصمت
+  }
+}
+
+// ================== 🐕 منظومة حارس الأمان ==================
 
 function startWatchdog() {
   clearTimeout(watchdogTimer);
   watchdogTimer = setTimeout(async () => {
     if (isBotReady) {
-      console.log(`🐕 [حارس الأمان]: مرت 25 ثانية من الركود! إنعاش الروم بإرسال [ ${START_COMMAND} ]...`);
+      console.log(`🐕 [حارس الأمان]: مرت 25 ثانية! إنعاش الروم بإرسال [ ${START_COMMAND} ]...`);
       await sendGroupMessageWithRetry(ROOM_ID, START_COMMAND);
       startWatchdog();
     }
@@ -61,11 +74,10 @@ function stopWatchdog() {
   }
 }
 
-// ================== 🔍 منظومة القنص العكسي المطور ==================
+// ================== 🔍 منظومة القنص العكسي ==================
 
 async function searchYandex(imageUrl) {
   try {
-    // محاولة إجبار ياندكس على التحدث بالعربية أيضاً عبر الهيدرز والروابط
     const searchUrl = `https://yandex.com/images/search?rpt=imageview&url=${encodeURIComponent(imageUrl)}&lang=ar`;
     const headers = getHumanHeaders();
     headers['Referer'] = 'https://www.google.com/'; 
@@ -74,20 +86,15 @@ async function searchYandex(imageUrl) {
     const $ = cheerio.load(response.data);
     
     const pageTitle = $('title').text().trim();
-    console.log(`🤖 [تشخيص Yandex]: عنوان الصفحة المستلمة هو [ ${pageTitle} ]`);
+    console.log(`🤖 [تشخيص Yandex]: عنوان الصفحة هو [ ${pageTitle} ]`);
 
     if (pageTitle.includes('Captcha') || pageTitle.includes('Robot') || pageTitle.includes('Access Denied')) {
       return '';
     }
 
     let foundTexts = [];
-    $('.CbirTags-Item, .CbirObjectResponse-Title, .CbirItem-Title, .CbirPage-Title'). Bellach((i, el) => {
+    $('.CbirTags-Item, .CbirObjectResponse-Title, .CbirItem-Title, .CbirPage-Title').each((i, el) => {
       foundTexts.push($(el).text().trim());
-    });
-
-    $('.Thumb-Image').each((i, el) => {
-      const altText = $(el).attr('alt');
-      if (altText) foundTexts.push(altText.trim());
     });
 
     return foundTexts.join(' ');
@@ -98,7 +105,6 @@ async function searchYandex(imageUrl) {
 
 async function searchBing(imageUrl) {
   try {
-    // 🔥 الحيلة التكتيكية: إجبار بينج على جلب النتائج بالعربية وبلاد السيرفر العربي المستهدف
     const searchUrl = `https://www.bing.com/images/searchbyimage?cbir=sbi&imgurl=${encodeURIComponent(imageUrl)}&setlang=ar&cc=SA`;
     const headers = getHumanHeaders();
     headers['Referer'] = 'https://www.bing.com/';
@@ -107,11 +113,10 @@ async function searchBing(imageUrl) {
     const $ = cheerio.load(response.data);
     
     const pageTitle = $('title').text().trim();
-    console.log(`🤖 [تشخيص Bing]: عنوان الصفحة المستلمة هو [ ${pageTitle} ]`);
+    console.log(`🤖 [تشخيص Bing]: عنوان الصفحة هو [ ${pageTitle} ]`);
 
     let bingResults = [];
     
-    // سحب التخمين الأساسي من العنوان
     if (pageTitle && pageTitle.includes('-')) {
       const cleanGuess = pageTitle.split('-')[0].trim();
       if (!['Bing', 'Search', 'بحث', 'Images', 'صورة', 'Visual'].includes(cleanGuess)) {
@@ -119,31 +124,29 @@ async function searchBing(imageUrl) {
       }
     }
 
-    // خيار احتياطي من الكلاسات الداخلية
     $('.cb_title, .b_focusText, .vsc_title, .VisualSearchCaptionTitle').each((i, el) => {
       bingResults.push($(el).text().trim());
     });
 
     return bingResults.join(' ');
   } catch (err) {
-    console.log('⚠️ [Bing]: فشل قشط محرك بينج أو انتهت المهلة.');
     return '';
   }
 }
 
-// ================== 🧼 فلترة وتصفية الكلمات وتجهيز الحل البشري ==================
+// ================== 🧼 فلترة وتجهيز الحل البشري ==================
 
-function cleanAndFilterResult(rawText, category) {
+async function cleanAndFilterResult(rawText, category) {
   if (!rawText) return '';
 
-  console.log(`📋 [نص المحركات الخام]: ${rawText.substring(0, 150)}...`);
+  console.log(`📋 [نص المحركات الخام]: ${rawText.substring(0, 100)}...`);
 
   let text = rawText
     .replace(/[❌⭕⭐✨🔍🔴🔵🆚|,\-_()/\\:.]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 
-  const blacklistedWords = ['صورة', 'البحث', 'خمن', 'لعبة', 'انمي', 'الفئة', 'تحميل', 'جوجل', 'ياندكس', 'شخصية', 'الفنان', 'الممثل', 'تصوير', 'images', 'yandex', 'google', 'captcha', 'بحث'];
+  const blacklistedWords = ['صورة', 'البحث', 'خمن', 'لعبة', 'انمي', 'الفئة', 'تحميل', 'جوجل', 'ياندكس', 'شخصية', 'تصوير', 'images', 'yandex', 'google', 'captcha', 'بحث'];
   
   let words = text.split(' ').filter(word => {
     return word.length > 1 && !blacklistedWords.includes(word.toLowerCase());
@@ -151,21 +154,21 @@ function cleanAndFilterResult(rawText, category) {
 
   if (words.length === 0) return '';
 
-  // 🧠 ذكاء الفلترة المطور ومنع البتر:
   let maxWords = 2;
-  
-  // إذا كانت الكلمة الثانية أداة ربط أجنبية، نرفع حد الجلب لـ 3 كلمات لضمان اكتمال الاسم الجغرافي أو الفني
   if (words[1] && ['di', 'of', 'de', 'the', 'da', 'del', 'la'].includes(words[1].toLowerCase())) {
     maxWords = 3;
   }
   
   let finalAnswer = words.slice(0, maxWords).join(' ');
 
-  console.log(`🧠 [تصفية الذكاء البصري]: الفئة [ ${category} ] ⬅️ الحل المستخرج [ ${finalAnswer} ]`);
-  return finalAnswer;
+  // 🌍 تمرير الكلمة المستخرجة للمترجم قبل اعتمادها
+  let arabicAnswer = await forceArabicTranslation(finalAnswer);
+
+  console.log(`🧠 [القرار النهائي]: الفئة [ ${category} ] ⬅️ الإجابة الجاهزة للرمي [ ${arabicAnswer} ]`);
+  return arabicAnswer;
 }
 
-// ================== 🎮 معالجة البيانات وإدارة جولات اللعبة ==================
+// ================== 🎮 معالجة جولات اللعبة ==================
 
 async function handleIncomingData(message) {
   const bodyText = message.body || '';
@@ -176,12 +179,12 @@ async function handleIncomingData(message) {
       const match = bodyText.match(/الفئة:\s*([^\r\n]+)/);
       if (match) {
         currentCategory = match[1].trim();
-        console.log(`📝 [ذاكرة الفئة]: تم رصد الفئة وتخزينها بنجاح ⬅️ [ ${currentCategory} ]`);
+        console.log(`📝 [ذاكرة الفئة]: تم التخزين ⬅️ [ ${currentCategory} ]`);
       }
     }
     
     if (bodyText.includes('خمنت ذلك في') || bodyText.includes('انتهى الوقت')) {
-      console.log('🏁 [نهاية الجولة]: رصد إعلان انتهاء اللعبة، بدء عداد الأمان الـ 25 ثانية...');
+      console.log('🏁 [نهاية الجولة]: بدء عداد الأمان الـ 25 ثانية...');
       currentCategory = ''; 
       startWatchdog();
     }
@@ -191,8 +194,7 @@ async function handleIncomingData(message) {
   if (message.type === 'text/image_link') {
     stopWatchdog(); 
     const imageUrl = bodyText.trim();
-    console.log(`📸 [صيد الهدف]: تم استلام رابط الصورة بنجاح: ${imageUrl}`);
-    console.log('🚀 [السباق الذكي]: تفعيل المحركات بالتوازي لمحاكاة تصفح بشري...');
+    console.log(`📸 [صيد الهدف]: رابط الصورة: ${imageUrl}`);
     
     const [yandexResult, bingResult] = await Promise.all([
       searchYandex(imageUrl),
@@ -200,43 +202,41 @@ async function handleIncomingData(message) {
     ]);
 
     const combinedRawResult = `${yandexResult} ${bingResult}`.trim();
-    const finalDecision = cleanAndFilterResult(combinedRawResult, currentCategory);
+    
+    // ⚠️ استدعاء دالة الفلترة (أصبحت غير متزامنة await بسبب المترجم)
+    const finalDecision = await cleanAndFilterResult(combinedRawResult, currentCategory);
 
     if (finalDecision) {
-      // ⏳ تأخير بشري عشوائي (تفكير مابين 2.5 إلى 4.5 ثوانٍ) حماية للحساب من الباند
       const humanDelay = Math.floor(Math.random() * (4500 - 2500 + 1)) + 2500;
-      console.log(`⏳ محاكاة تفكير بشري، إرسال الحل [ ${finalDecision} ] بعد [ ${humanDelay}ms ]...`);
+      console.log(`⏳ تأخير تفكير بشري [ ${humanDelay}ms ]...`);
       
       setTimeout(async () => {
         await sendGroupMessageWithRetry(ROOM_ID, finalDecision);
         startWatchdog(); 
       }, humanDelay);
     } else {
-      console.log('❌ [فشل القنص]: لم تخرج المحركات بنتيجة واضحة، الصمت البشري هو الحل لتفادي الخطأ.');
+      console.log('❌ [فشل القنص]: لم يتم استخراج نتيجة واضحة.');
       startWatchdog(); 
     }
   }
 }
 
-// ================== ✉️ منظومة الإرسال الموثوق والمحصن ==================
+// ================== ✉️ منظومة الإرسال الموثوق ==================
 
 async function sendGroupMessageWithRetry(roomId, text, attempt = 1) {
   if (!service || !isBotReady) return;
   try {
     const response = await service.messaging.sendGroupMessage(roomId, text);
-    if (!response || response.isSuccess === false) {
-      throw new Error(`كود الرفض أو فشل الإرسال المباشر`);
-    }
-    console.log(`✅ تم إرسال النص بنجاح في القناة: [ ${text} ]`);
+    if (!response || response.isSuccess === false) throw new Error(`رفض السيرفر`);
+    console.log(`✅ تم الإرسال: [ ${text} ]`);
   } catch (err) {
-    console.log(`⚠️ فشل إرسال [ ${text} ]، محاولة جولة ثانية [ ${attempt}/3 ]: ${err.message}`);
     if (attempt < 3) {
       setTimeout(() => sendGroupMessageWithRetry(roomId, text, attempt + 1), 2000);
     }
   }
 }
 
-// ================== 📶 ربط الأحداث وتشغيل المنظومة الميكانيكية ==================
+// ================== 📶 ربط الأحداث ==================
 
 function startBot() {
   service = new WOLF();
@@ -250,12 +250,11 @@ function startBot() {
   });
 
   service.on('ready', async () => {
-    console.log('🚀 [الجاهزية]: بوت قناص خمن يعمل الآن بكفاءة بشرية قصوى ومجاني 100%.');
+    console.log('🚀 [الجاهزية]: بوت قناص خمن يعمل بكفاءة قصوى (مدمج بالمترجم).');
     isBotReady = true;
     reconnecting = false;
     
     await sleep(2000);
-    console.log(`🔥 إشعال اللعبة لأول مرة عبر إرسال: [ ${START_COMMAND} ]`);
     await sendGroupMessageWithRetry(ROOM_ID, START_COMMAND);
     startWatchdog();
   });
@@ -265,7 +264,7 @@ function startBot() {
     reconnecting = true;
     isBotReady = false;
     stopWatchdog();
-    console.log('🚨 [اتصال]: تم قطع الاتصال! جاري محاولة إعادة الإنعاش والاتصال بعد 5 ثوانٍ...');
+    console.log('🚨 [اتصال]: انقطاع! محاولة العودة بعد 5 ثوانٍ...');
     setTimeout(startBot, 5000);
   };
 
